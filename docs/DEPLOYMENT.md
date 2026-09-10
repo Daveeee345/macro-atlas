@@ -2,6 +2,14 @@
 
 Production uses Netlify for the Next.js application and serverless functions, and Supabase PostgreSQL for durable data. The Python/FastAPI and SQLite implementation remains a local reference only.
 
+## Current production targets
+
+- GitHub: `Daveeee345/macro-atlas`, branch `main`
+- Netlify: `macro-atlas` (`f582b6ae-f4df-4f86-866f-a19657d78e70`), `https://macro-atlas.netlify.app`
+- Supabase: `macro-atlas` (`jejserxzmrzxrlxrkmgb`)
+
+The Netlify site is connected to GitHub for continuous deployment. Production credentials are stored only in Netlify environment variables and local ignored environment files.
+
 ## 1. Create and migrate Supabase
 
 1. Create a Supabase project.

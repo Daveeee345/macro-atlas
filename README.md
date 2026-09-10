@@ -1,5 +1,7 @@
 # MACRO ATLAS
 
+Production: [macro-atlas.netlify.app](https://macro-atlas.netlify.app)
+
 **Global Macro State & Divergence Intelligence**
 
 Macro Atlas is a portfolio-grade macroeconomic intelligence terminal that turns observed macro data into a consistent cross-country analytical interface. It emphasizes **state, historical position, divergence, transparency, and auditability** rather than forecasts or causal claims.
