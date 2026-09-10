@@ -1,0 +1,35 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[functions."sync-scheduled"]
+  schedule = "17 */6 * * *"
+
+[functions."sync-background"]
+  background = true
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/health"
+  to = "/.netlify/functions/api/health"
+  status = 200
+  force = true
+
+[dev]
+  command = "npm run dev"
+  targetPort = 3000
+  port = 8888
+  framework = "#custom"

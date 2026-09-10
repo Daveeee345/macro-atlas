@@ -1,0 +1,42 @@
+{
+  "name": "macro-atlas-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:netlify": "netlify dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --test tests/*.test.cjs && tsx --test netlify/functions/tests/*.test.ts",
+    "db:seed-reference": "tsx scripts/seed-reference.ts"
+  },
+  "dependencies": {
+    "@netlify/functions": "^6.0.0",
+    "d3-geo": "^3.1.1",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
+    "d3-zoom": "^3.0.0",
+    "next": "^15.5.0",
+    "postgres": "^3.4.7",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/d3-geo": "^3.1.1",
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-transition": "^3.0.9",
+    "@types/d3-zoom": "^3.0.8",
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/topojson-client": "^3.1.5",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.8.0"
+  }
+}

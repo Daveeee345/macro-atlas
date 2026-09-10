@@ -1,0 +1,53 @@
+indicators:
+  - id: gdp_growth
+    name: Real GDP Growth
+    category: Growth
+    unit: "% YoY"
+    frequency: Quarterly / source-native
+    transformation: source-defined annual growth or YoY transformation
+  - id: inflation
+    name: Consumer Price Inflation
+    category: Inflation
+    unit: "% YoY"
+    frequency: Monthly
+    transformation: year-over-year
+  - id: policy_rate
+    name: Central Bank Policy Rate
+    category: Policy
+    unit: "%"
+    frequency: Decision-based
+    transformation: level
+  - id: gov_10y
+    name: 10Y Government Yield
+    category: Rates
+    unit: "%"
+    frequency: Daily / latest available
+    transformation: level
+  - id: current_account
+    name: Current Account Balance
+    category: External
+    unit: "% GDP"
+    frequency: Quarterly / Annual
+    transformation: level
+  - id: debt_gdp
+    name: Government Debt
+    category: Fiscal
+    unit: "% GDP"
+    frequency: Quarterly / Annual
+    transformation: level
+  - id: credit_growth
+    name: Private Credit Growth
+    category: Credit
+    unit: "% YoY"
+    frequency: Monthly / Quarterly
+    transformation: year-over-year
+
+live_connectors:
+  FRED:
+    notes: Requires FRED_API_KEY. Intended for series-level official/aggregated macro observations.
+  WorldBank:
+    notes: V2 Indicators API; no API key required.
+
+production_note: >-
+  Demo seed data is bundled so the interface works immediately. Replace registry mappings
+  with approved official series IDs before public or analytical use.
