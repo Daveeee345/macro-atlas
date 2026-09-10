@@ -16,6 +16,9 @@
 [functions."sync-background"]
   background = true
 
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"

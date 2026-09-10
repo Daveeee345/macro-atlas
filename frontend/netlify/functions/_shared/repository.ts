@@ -3,23 +3,46 @@ import { database, type Queryable } from "./db";
 import { MacroService } from "./service";
 import type { Dataset, NormalizedObservation, Observation } from "./types";
 
+const DATASET_CACHE_MS = 30_000;
+let cachedDataset: Dataset | undefined;
+let cachedDatasetAt = 0;
+let datasetInFlight: Promise<Dataset> | undefined;
+
 export class PostgresRepository {
   constructor(private readonly db: Queryable = database()) {}
 
   async dataset(): Promise<Dataset> {
-    const [catalogRows, countries, indicators, observations] = await Promise.all([
-      this.db.query<any>(`select code, name, iso2, iso3, numeric_code, geographic_region, subregion,
-        tier, is_core, groups, entity_type, lat, lon, metadata from public.country_catalog order by code`),
-      this.db.query<any>(`select code, name, region, lat, lon, gdp_weight, tier, coverage_score
-        from public.countries order by name`),
-      this.db.query<any>(`select id, name, category, unit, frequency, transformation, description,
-        methodology_version from public.indicators order by id`),
-      this.db.query<any>(`select id, country_code, indicator_id, period, observation_date::text,
-        value, source, source_series_id, retrieved_at::text, vintage_at::text,
-        coalesce(source_vintage_date::text, vintage_at::date::text) as vintage_date,
-        source_vintage_date::text, validation_status, validation_warnings, source_metadata
-        from public.current_observations order by country_code, indicator_id, observation_date, period`),
-    ]);
+    if (cachedDataset && Date.now() - cachedDatasetAt < DATASET_CACHE_MS) return cachedDataset;
+    if (!datasetInFlight) datasetInFlight = this.loadDataset();
+    try {
+      cachedDataset = await datasetInFlight;
+      cachedDatasetAt = Date.now();
+      return cachedDataset;
+    } finally {
+      datasetInFlight = undefined;
+    }
+  }
+
+  private async loadDataset(): Promise<Dataset> {
+    const [payload] = await this.db.query<any>(`select
+      (select coalesce(jsonb_agg(to_jsonb(row) order by row.code), '[]'::jsonb)
+        from (select code, name, iso2, iso3, numeric_code, geographic_region, subregion,
+          tier, is_core, groups, entity_type, lat, lon, metadata from public.country_catalog) row) as catalog,
+      (select coalesce(jsonb_agg(to_jsonb(row) order by row.name), '[]'::jsonb)
+        from (select code, name, region, lat, lon, gdp_weight, tier, coverage_score from public.countries) row) as countries,
+      (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
+        from (select id, name, category, unit, frequency, transformation, description,
+          methodology_version from public.indicators) row) as indicators,
+      (select coalesce(jsonb_agg(to_jsonb(row) order by row.country_code, row.indicator_id, row.observation_date, row.period), '[]'::jsonb)
+        from (select id, country_code, indicator_id, period, observation_date::text,
+          value, source, source_series_id, retrieved_at::text, vintage_at::text,
+          coalesce(source_vintage_date::text, vintage_at::date::text) as vintage_date,
+          source_vintage_date::text, validation_status, validation_warnings, source_metadata
+          from public.current_observations) row) as observations`);
+    const catalogRows: any[] = payload?.catalog || [];
+    const countries: any[] = payload?.countries || [];
+    const indicators: any[] = payload?.indicators || [];
+    const observations: any[] = payload?.observations || [];
     return {
       catalog: catalogRows.map((row) => ({ ...row.metadata, ...row, metadata: undefined })),
       countries: countries.map(numericRow),
