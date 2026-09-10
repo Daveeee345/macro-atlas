@@ -11,7 +11,7 @@ test("PostgreSQL repository preserves a changed value as a new vintage", async (
       return matches.length ? [{ value: matches.at(-1).value, validation_status: matches.at(-1).status }] : [];
     }
     if (text.includes("insert into public.observations")) {
-      versions.push({ country: params[0], indicator: params[1], period: params[2], value: params[4], vintage: params[8], status: params[10] });
+      versions.push({ country: params[0], indicator: params[1], period: params[2], value: params[4], vintage: params[8], status: params[10], metadata: params[12] });
       return [{ id: versions.length }];
     }
     return [];
@@ -22,6 +22,7 @@ test("PostgreSQL repository preserves a changed value as a new vintage", async (
   assert.equal(await repository.upsertObservation({ ...first, vintage_at: "2024-01-02T00:00:00Z" }), false);
   assert.equal(await repository.upsertObservation(row(1.5, "2024-02-01T00:00:00Z")), true);
   assert.deepEqual(versions.map((version) => [version.value, version.vintage]), [[1, "2024-01-01T00:00:00Z"], [1.5, "2024-02-01T00:00:00Z"]]);
+  assert.equal(typeof versions[0].metadata, "object", "JSONB parameters must not be pre-stringified");
 });
 
 function row(value: number, vintage_at: string): NormalizedObservation {

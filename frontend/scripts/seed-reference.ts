@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 
+async function main() {
 const connectionString = process.env.SUPABASE_DATABASE_URL;
 if (!connectionString) throw new Error("SUPABASE_DATABASE_URL is required");
-
 const catalogPath = fileURLToPath(new URL("../../backend/data/country_catalog.json", import.meta.url));
 const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
 const indicators = [
@@ -29,20 +29,26 @@ try {
       on conflict(code) do update set name=excluded.name,iso2=excluded.iso2,iso3=excluded.iso3,numeric_code=excluded.numeric_code,
         geographic_region=excluded.geographic_region,subregion=excluded.subregion,tier=excluded.tier,is_core=excluded.is_core,
         groups=excluded.groups,entity_type=excluded.entity_type,lat=excluded.lat,lon=excluded.lon,metadata=excluded.metadata,updated_at=now()`,
-      [JSON.stringify(catalog.map((country: any) => ({ ...country, metadata: country })))]);
+      [catalog.map((country: any) => ({ ...country, metadata: country }))]);
     await tx.unsafe(`insert into public.countries(code,name,region,lat,lon,gdp_weight,tier)
       select x.code,x.name,x.region,x.lat,x.lon,x.gdp_weight,x.tier
       from jsonb_to_recordset($1::jsonb) as x(code text,name text,region text,lat double precision,lon double precision,gdp_weight double precision,tier smallint)
       on conflict(code) do update set name=excluded.name,region=excluded.region,lat=excluded.lat,lon=excluded.lon,
         gdp_weight=excluded.gdp_weight,tier=excluded.tier,updated_at=now()`,
-      [JSON.stringify(catalog.filter((country: any) => country.is_core).map((country: any) => ({ ...country, gdp_weight: weights[country.code] || null })))]);
+      [catalog.filter((country: any) => country.is_core).map((country: any) => ({ ...country, gdp_weight: weights[country.code] || null }))]);
     await tx.unsafe(`insert into public.indicators(id,name,category,unit,frequency,transformation,description)
       select * from jsonb_to_recordset($1::jsonb) as x(id text,name text,category text,unit text,frequency text,transformation text,description text)
       on conflict(id) do update set name=excluded.name,category=excluded.category,unit=excluded.unit,frequency=excluded.frequency,
         transformation=excluded.transformation,description=excluded.description,updated_at=now()`,
-      [JSON.stringify(indicators.map(([id, name, category, unit, frequency, transformation, description]) => ({ id, name, category, unit, frequency, transformation, description })))]);
+      [indicators.map(([id, name, category, unit, frequency, transformation, description]) => ({ id, name, category, unit, frequency, transformation, description }))]);
   });
   console.log(`Seeded ${catalog.length} catalog entries, ${catalog.filter((country: any) => country.is_core).length} analytical countries, and ${indicators.length} indicators.`);
 } finally {
   await sql.end();
 }
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : "Reference seed failed");
+  process.exitCode = 1;
+});

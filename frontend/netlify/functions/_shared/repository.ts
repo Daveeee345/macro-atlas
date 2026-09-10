@@ -87,7 +87,7 @@ export class PostgresRepository {
       checked_series = $3, inserted_rows = $4, skipped_rows = $5, failed_series = $6,
       message = $7, details = $8::jsonb where id = $1::uuid`, [id, result.status,
       result.checkedSeries, result.insertedRows, result.skippedRows, result.failedSeries,
-      result.message, JSON.stringify(result.details || {})]);
+      result.message, result.details || {}]);
   }
 
   async assertMapping(country: string, indicator: string): Promise<void> {
@@ -113,13 +113,13 @@ export class PostgresRepository {
       row.country_code, row.indicator_id, row.period, row.observation_date, row.value,
       row.source, row.source_series_id, row.retrieved_at, row.vintage_at,
       row.source_vintage_date, row.validation_status, row.validation_warnings,
-      JSON.stringify(row.source_metadata),
+      row.source_metadata,
     ]);
     if (!inserted[0]) return false;
     await this.db.query(`insert into public.data_lineage(
       observation_id, provider, provider_url, source_payload, transformation
     ) values ($1,$2,$3,$4::jsonb,$5)`, [inserted[0].id, row.source,
-      String(row.source_metadata.provider_url || ""), JSON.stringify(row.source_metadata),
+      String(row.source_metadata.provider_url || ""), row.source_metadata,
       String(row.source_metadata.transformation || "identity")]);
     return true;
   }
