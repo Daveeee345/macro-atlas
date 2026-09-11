@@ -29,7 +29,8 @@ export class PostgresRepository {
         from (select code, name, iso2, iso3, numeric_code, geographic_region, subregion,
           tier, is_core, groups, entity_type, lat, lon, metadata from public.country_catalog) row) as catalog,
       (select coalesce(jsonb_agg(to_jsonb(row) order by row.name), '[]'::jsonb)
-        from (select code, name, region, lat, lon, gdp_weight, tier, coverage_score from public.countries) row) as countries,
+        from (select code, name, region, subregion, lat, lon, gdp_weight, tier, is_core,
+          coverage_score, data_status from public.countries) row) as countries,
       (select coalesce(jsonb_agg(to_jsonb(row) order by row.id), '[]'::jsonb)
         from (select id, name, category, unit, frequency, transformation, description,
           methodology_version from public.indicators) row) as indicators,
@@ -84,10 +85,15 @@ export class PostgresRepository {
       (select count(*)::int from public.countries) as countries,
       (select count(distinct country_code || ':' || indicator_id)::int from public.current_observations) as series,
       (select count(*)::int from public.observations) as observations,
+      (select count(distinct country_code)::int from public.current_observations) as economies_with_observations,
       (select count(*)::int from public.current_observations where validation_status <> 'VALID') as validation_warnings,
       (select max(retrieved_at)::text from public.observations) as last_sync,
       (select max(period) from public.current_observations) as latest_period,
-      (select max(completed_at)::text from public.sync_runs where status in ('SUCCEEDED','PARTIAL','NOOP')) as last_completed_sync`);
+      (select max(completed_at)::text from public.sync_runs where status in ('SUCCEEDED','PARTIAL')) as last_completed_sync,
+      (select coalesce(jsonb_agg(to_jsonb(p) order by p.source), '[]'::jsonb) from (
+        select source, count(*)::int observations, count(distinct country_code)::int countries,
+          count(distinct indicator_id)::int series from public.current_observations group by source
+      ) p) as providers`);
     return stats;
   }
 
@@ -121,6 +127,45 @@ export class PostgresRepository {
     if (!rows[0]?.indicator_exists) throw new Error(`Indicator ${indicator} is not seeded`);
   }
 
+  async analyticalCountryCodes(): Promise<string[]> {
+    const rows = await this.db.query<{ code: string }>("select code from public.countries order by code");
+    return rows.map((row) => row.code);
+  }
+
+  async bulkUpsertObservations(rows: NormalizedObservation[]): Promise<number> {
+    if (!rows.length) return 0;
+    const [result] = await this.db.query<{ inserted: number }>(`with incoming as (
+      select * from jsonb_to_recordset($1::jsonb) as x(
+        country_code text, indicator_id text, period text, observation_date date, value double precision,
+        source text, source_series_id text, retrieved_at timestamptz, vintage_at timestamptz,
+        source_vintage_date date, validation_status text, validation_warnings text[], source_metadata jsonb)
+    ), inserted as (
+      insert into public.observations(country_code, indicator_id, period, observation_date, value, source,
+        source_series_id, retrieved_at, vintage_at, source_vintage_date, validation_status,
+        validation_warnings, source_metadata)
+      select i.country_code, i.indicator_id, i.period, i.observation_date, i.value, i.source,
+        i.source_series_id, i.retrieved_at, i.vintage_at, i.source_vintage_date, i.validation_status,
+        i.validation_warnings, i.source_metadata
+      from incoming i
+      where not exists (
+        select 1 from public.current_observations current
+        where current.country_code = i.country_code and current.indicator_id = i.indicator_id
+          and current.period = i.period and current.value = i.value
+          and current.validation_status = i.validation_status)
+      on conflict(country_code, indicator_id, period, vintage_at) do nothing
+      returning id, country_code, indicator_id, period
+    ), lineage as (
+      insert into public.data_lineage(observation_id, provider, provider_url, source_payload, transformation)
+      select inserted.id, incoming.source, incoming.source_metadata->>'provider_url',
+        incoming.source_metadata, incoming.source_metadata->>'transformation'
+      from inserted join incoming using(country_code, indicator_id, period)
+      returning id
+    ) select count(*)::int as inserted from inserted`, [rows]);
+    const inserted = Number(result?.inserted || 0);
+    if (inserted) invalidateDatasetCache();
+    return inserted;
+  }
+
   async upsertObservation(row: NormalizedObservation): Promise<boolean> {
     const [current] = await this.db.query<any>(`select value, validation_status from public.current_observations
       where country_code = $1 and indicator_id = $2 and period = $3`,
@@ -144,6 +189,7 @@ export class PostgresRepository {
     ) values ($1,$2,$3,$4::jsonb,$5)`, [inserted[0].id, row.source,
       String(row.source_metadata.provider_url || ""), row.source_metadata,
       String(row.source_metadata.transformation || "identity")]);
+    invalidateDatasetCache();
     return true;
   }
 
@@ -153,17 +199,25 @@ export class PostgresRepository {
         bool_or(indicator_id = 'policy_rate') as has_policy,
         bool_or(indicator_id = 'inflation') as has_inflation
       from public.current_observations where validation_status = 'VALID'
+        and indicator_id in ('gdp_growth','inflation','policy_rate','gov_10y','current_account','debt_gdp','private_credit_gdp')
       group by country_code
     ), scores as (
       select c.code, coalesce(v.raw_count, 0) + case when coalesce(v.has_policy, false) and coalesce(v.has_inflation, false) then 1 else 0 end as available
       from public.countries c left join valid v on v.country_code = c.code
     ) update public.countries c set coverage_score = round(least(8, scores.available) * 100.0 / 8, 1),
       updated_at = now() from scores where c.code = scores.code`);
+    await this.db.query(`update public.countries set data_status = case
+      when coverage_score >= 90 then 'FULL'
+      when coverage_score >= 70 then 'GOOD'
+      when coverage_score >= 50 then 'PARTIAL'
+      when coverage_score > 0 then 'LIMITED'
+      else 'UNAVAILABLE' end`);
   }
 
   async refreshDerivedMetrics(): Promise<void> {
     const dataset = await this.dataset();
     const service = new MacroService(dataset);
+    const derived: Array<Record<string, unknown>> = [];
     for (const country of dataset.countries) {
       const snapshot = service.countrySnapshot(country.code);
       const period = snapshot.latest_period;
@@ -177,14 +231,26 @@ export class PostgresRepository {
         ["macro_regime", null, snapshot.regime],
       ];
       for (const [metric, value, valueText] of values) {
-        await this.db.query(`insert into public.derived_metrics(
-          country_code, metric_id, period, value, value_text, methodology_version,
-          input_observation_ids, input_fingerprint, validation_status
-        ) values ($1,$2,$3,$4,$5,'v1',$6::bigint[],$7,'VALID') on conflict do nothing`,
-        [country.code, metric, period, value, valueText, inputs, fingerprint]);
+        derived.push({ country_code: country.code, metric_id: metric, period, value,
+          value_text: valueText, input_observation_ids: inputs, input_fingerprint: fingerprint });
       }
     }
+    if (!derived.length) return;
+    await this.db.query(`insert into public.derived_metrics(
+      country_code, metric_id, period, value, value_text, methodology_version,
+      input_observation_ids, input_fingerprint, validation_status
+    ) select x.country_code, x.metric_id, x.period, x.value, x.value_text, 'v1',
+      x.input_observation_ids, x.input_fingerprint, 'VALID'
+      from jsonb_to_recordset($1::jsonb) as x(country_code text, metric_id text, period text,
+        value double precision, value_text text, input_observation_ids bigint[], input_fingerprint text)
+      on conflict do nothing`, [derived]);
   }
+}
+
+function invalidateDatasetCache(): void {
+  cachedDataset = undefined;
+  cachedDatasetAt = 0;
+  datasetInFlight = undefined;
 }
 
 function numericRow<T extends Record<string, any>>(row: T): T {

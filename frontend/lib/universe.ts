@@ -33,7 +33,7 @@ export const indicatorLabels: Record<string, string> = {
   gov_10y: "10Y government yield",
   current_account: "Current account",
   debt_gdp: "Debt / GDP",
-  credit_growth: "Credit growth",
+  private_credit_gdp: "Private credit / GDP",
 };
 export type Layer =
   | "state"

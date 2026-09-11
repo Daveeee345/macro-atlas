@@ -34,3 +34,28 @@ test("empty mapping configuration is an explicit no-op without synthetic fallbac
   assert.equal(result.status, "NOOP");
   assert.equal(status, "NOOP");
 });
+
+test("production bulk sync preserves repository-controlled revision semantics", async () => {
+  let bulkRows: any[] = [];
+  const repository: any = {
+    startSync: async () => "run-3",
+    finishSync: async () => undefined,
+    analyticalCountryCodes: async () => ["CAN"],
+    bulkUpsertObservations: async (rows: any[]) => { bulkRows = bulkRows.concat(rows); return rows.length; },
+    refreshCoverage: async () => undefined,
+    refreshDerivedMetrics: async () => undefined,
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([{}, [{ countryiso3code: "CAN", date: "2023", value: 1, obs_status: "" },
+    { countryiso3code: "USA", date: "2023", value: 2, obs_status: "" },
+    { countryiso3code: "CAN", date: "2024", value: 3, obs_status: "F" }]]), { status: 200 });
+  try {
+    const result = await syncOfficialData({ repository, mappings: [], globalWdi: true, now: () => new Date("2025-01-10T12:00:00Z") });
+    assert.equal(result.checkedSeries, 5);
+    assert.equal(result.insertedRows, 5);
+    assert.equal(bulkRows.length, 5);
+    assert.equal(bulkRows.every((row) => row.country_code === "CAN" && row.period === "2023"), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

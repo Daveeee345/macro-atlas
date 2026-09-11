@@ -9,7 +9,7 @@ const dims = [
   ["Policy", "policy_rate"],
   ["Real rates", "real_policy_rate"],
   ["External", "current_account"],
-  ["Credit", "credit_growth"],
+  ["Private Credit / GDP", "private_credit_gdp"],
 ] as const;
 export default function CountryDeepDive({
   country,

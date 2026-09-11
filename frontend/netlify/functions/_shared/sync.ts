@@ -2,13 +2,22 @@ import { PostgresRepository } from "./repository";
 import type { NormalizedObservation, OfficialSeriesMapping, ValidationStatus } from "./types";
 
 type RawObservation = { date: string; value: number | null; sourceVintageDate?: string | null; sourcePayload?: Record<string, unknown> };
-type SyncRepository = Pick<PostgresRepository, "startSync" | "finishSync" | "assertMapping" | "upsertObservation" | "refreshCoverage" | "refreshDerivedMetrics">;
+type SyncRepository = Pick<PostgresRepository, "startSync" | "finishSync" | "assertMapping" | "upsertObservation" | "refreshCoverage" | "refreshDerivedMetrics"> &
+  Partial<Pick<PostgresRepository, "analyticalCountryCodes" | "bulkUpsertObservations">>;
 type ProviderFetcher = (mapping: OfficialSeriesMapping) => Promise<RawObservation[]>;
 
 const BOUNDS: Record<string, [number, number]> = {
   gdp_growth: [-35, 35], inflation: [-20, 150], policy_rate: [-5, 100], gov_10y: [-5, 100],
-  current_account: [-50, 50], debt_gdp: [0, 500], credit_growth: [-100, 200],
+  current_account: [-50, 50], debt_gdp: [0, 500], private_credit_gdp: [0, 500],
 };
+
+const WDI_REGISTRY = [
+  { indicator: "gdp_growth", seriesId: "NY.GDP.MKTP.KD.ZG" },
+  { indicator: "inflation", seriesId: "FP.CPI.TOTL.ZG" },
+  { indicator: "current_account", seriesId: "BN.CAB.XOKA.GD.ZS" },
+  { indicator: "debt_gdp", seriesId: "GC.DOD.TOTL.GD.ZS" },
+  { indicator: "private_credit_gdp", seriesId: "FS.AST.PRVT.GD.ZS" },
+] as const;
 
 export function mappingsFromEnvironment(raw = process.env.MACRO_ATLAS_SERIES_CONFIG || "[]"): OfficialSeriesMapping[] {
   const value = JSON.parse(raw);
@@ -27,6 +36,7 @@ export async function syncOfficialData(options: {
   mappings?: OfficialSeriesMapping[];
   fetcher?: ProviderFetcher;
   now?: () => Date;
+  globalWdi?: boolean;
 } = {}) {
   const repository = options.repository || new PostgresRepository();
   const mappings = options.mappings || mappingsFromEnvironment();
@@ -37,7 +47,22 @@ export async function syncOfficialData(options: {
   let skippedRows = 0;
   let failedSeries = 0;
   const failures: Array<{ mapping: string; error: string }> = [];
-  if (!mappings.length) {
+  const globalWdi = options.globalWdi ?? !options.repository;
+  if (globalWdi && repository.analyticalCountryCodes && repository.bulkUpsertObservations) {
+    const codes = new Set(await repository.analyticalCountryCodes());
+    for (const definition of WDI_REGISTRY) {
+      try {
+        const rows = await fetchWorldBankGlobal(definition.indicator, definition.seriesId, codes, now());
+        const inserted = await repository.bulkUpsertObservations(rows);
+        insertedRows += inserted;
+        skippedRows += rows.length - inserted;
+      } catch (error) {
+        failedSeries += 1;
+        failures.push({ mapping: `GLOBAL:${definition.indicator}`, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+  if (!mappings.length && !globalWdi) {
     const result = { status: "NOOP" as const, checkedSeries: 0, insertedRows: 0, skippedRows: 0, failedSeries: 0,
       message: "No approved official-series mappings configured." };
     await repository.finishSync(runId, result);
@@ -72,11 +97,48 @@ export async function syncOfficialData(options: {
   }
   await repository.refreshCoverage();
   await repository.refreshDerivedMetrics();
-  const status = failedSeries === mappings.length ? "FAILED" : failedSeries ? "PARTIAL" : "SUCCEEDED";
-  const result = { status, checkedSeries: mappings.length, insertedRows, skippedRows, failedSeries,
+  const checkedSeries = mappings.length + (globalWdi ? WDI_REGISTRY.length : 0);
+  const status = failedSeries === checkedSeries ? "FAILED" : failedSeries ? "PARTIAL" : "SUCCEEDED";
+  const result = { status, checkedSeries, insertedRows, skippedRows, failedSeries,
     message: `${insertedRows} new or revised observations stored; ${skippedRows} unchanged or missing rows skipped.`, details: { failures } } as const;
   await repository.finishSync(runId, result);
   return { runId, ...result };
+}
+
+async function fetchWorldBankGlobal(indicator: string, seriesId: string, allowedCodes: Set<string>, now: Date): Promise<NormalizedObservation[]> {
+  const endYear = now.getUTCFullYear();
+  const startYear = endYear - 15;
+  const url = new URL(`https://api.worldbank.org/v2/country/all/indicator/${seriesId}`);
+  url.searchParams.set("format", "json");
+  url.searchParams.set("source", "2");
+  url.searchParams.set("date", `${startYear}:${endYear}`);
+  url.searchParams.set("per_page", "20000");
+  const response = await fetch(url, { signal: AbortSignal.timeout(45_000) });
+  if (!response.ok) throw new Error(`World Bank ${response.status}`);
+  const payload = await response.json() as any;
+  const rawRows = Array.isArray(payload) && Array.isArray(payload[1]) ? payload[1] : [];
+  const retrievedAt = now.toISOString();
+  return rawRows.flatMap((item: any): NormalizedObservation[] => {
+    const providerCode = String(item.countryiso3code || item.country?.id || "").toUpperCase();
+    const code = providerCode === "EMU" ? "EUR" : providerCode;
+    const value = item.value == null ? null : Number(item.value);
+    if (!allowedCodes.has(code) || value == null || !Number.isFinite(value) || item.obs_status === "F") return [];
+    const validation = validate(indicator, value);
+    return [{
+      country_code: code, indicator_id: indicator, period: String(item.date),
+      observation_date: `${item.date}-12-31`, value, source: "WORLDBANK",
+      source_series_id: seriesId, retrieved_at: retrievedAt, vintage_at: retrievedAt,
+      source_vintage_date: null, validation_status: validation.status,
+      validation_warnings: validation.warnings,
+      source_metadata: {
+        provider_url: `https://data.worldbank.org/indicator/${seriesId}`,
+        transformation: "identity",
+        provider_country_code: providerCode,
+        decimal: item.decimal ?? null,
+        observation_status: item.obs_status || null,
+      },
+    }];
+  });
 }
 
 export async function fetchOfficialSeries(mapping: OfficialSeriesMapping): Promise<RawObservation[]> {

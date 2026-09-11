@@ -22,7 +22,7 @@ export default function DataView({
           "gov_10y",
           "current_account",
           "debt_gdp",
-          "credit_growth",
+          "private_credit_gdp",
         ].includes(id),
       )
       .filter(([, m]) => m.value != null)
@@ -63,21 +63,21 @@ export default function DataView({
           <span className="eyebrow">COVERAGE & LINEAGE</span>
           <h1>Data observatory</h1>
         </div>
-        <div className="view-badge demo">SYNTHETIC DEMO</div>
+        <div className="view-badge">{status?.mode === "LIVE_OFFICIAL" ? "OFFICIAL DATA" : "DATA UNAVAILABLE"}</div>
       </div>
       <section className="global-coverage">
         <div>
           <span className="eyebrow">
-            GLOBAL COVERAGE / COUNTRIES, TERRITORIES & AGGREGATES
+            GLOBAL COVERAGE / ANALYTICAL ECONOMIES
           </span>
           <div className="coverage-totals">
             <div>
               <strong>{countries.length || "—"}</strong>
-              <span>Catalog entries</span>
+              <span>Analytical economies</span>
             </div>
             <div>
               <strong>{countries.length ? analytical : "—"}</strong>
-              <span>With analytics</span>
+              <span>With ≥1 observation</span>
             </div>
             {[1, 2, 3].map((t) => (
               <div key={t}>
@@ -126,7 +126,7 @@ export default function DataView({
             </p>
             <p>
               <span>Observations</span>
-              <b>{status?.observations || 0}</b>
+              <b>{status?.observations?.toLocaleString() || 0}</b>
             </p>
             <p>
               <span>Validation warnings</span>
@@ -134,7 +134,7 @@ export default function DataView({
             </p>
             <p>
               <span>Mode</span>
-              <b>{status?.mode || "—"}</b>
+              <b>{status?.mode === "LIVE_OFFICIAL" ? "Official production" : "Unavailable"}</b>
             </p>
           </div>
         </div>
@@ -142,13 +142,13 @@ export default function DataView({
           <div className="section-label">DATA SOURCE ARCHITECTURE</div>
           <div className="source-flow">
             <div>
-              FRED<span>series API</span>
+              WORLD BANK<span>WDI Indicators V2</span>
             </div>
             <div>
-              WORLD BANK<span>Indicators V2</span>
+              BIS<span>awaiting verified mapping</span>
             </div>
             <div>
-              BI / BPS<span>production mapping</span>
+              FRED<span>optional approved mappings</span>
             </div>
             <i>→</i>
             <div className="flow-core">
@@ -160,8 +160,9 @@ export default function DataView({
             </div>
           </div>
           <p className="data-disclaimer">
-            Bundled values are synthetic demo data. Production use requires
-            approved official series mappings and source-specific validation.
+            {status?.providers?.length
+              ? status.providers.map((provider) => `${provider.source}: ${provider.countries} economies · ${provider.series} indicators · ${provider.observations.toLocaleString()} observations`).join("  /  ")
+              : "No official provider observations are currently available."}
           </p>
         </div>
       </div>
@@ -203,8 +204,8 @@ export default function DataView({
         <div>
           <strong>HISTORICAL PERCENTILE</strong>
           <p>
-            Current observation&apos;s rank within the available historical
-            sample.
+            Current observation&apos;s empirical rank within its trailing 10
+            calendar years, with no future observations.
           </p>
         </div>
         <div>

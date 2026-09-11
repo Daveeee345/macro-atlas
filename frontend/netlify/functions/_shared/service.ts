@@ -1,7 +1,7 @@
 import { coverage, difference, percentileRank, rangeStats, realPolicyRate, regime, REQUIRED_INDICATORS, round } from "./analytics";
 import type { CatalogCountry, Country, Dataset, Observation } from "./types";
 
-const CORE_INDICATORS = ["gdp_growth", "inflation", "policy_rate", "gov_10y", "current_account", "debt_gdp", "credit_growth"];
+const CORE_INDICATORS = ["gdp_growth", "inflation", "policy_rate", "gov_10y", "current_account", "debt_gdp", "private_credit_gdp"];
 
 export class MacroService {
   private readonly catalog = new Map<string, CatalogCountry>();
@@ -25,7 +25,9 @@ export class MacroService {
     if (!series.length) return emptyMetric(indicatorId);
     const latest = series.at(-1)!;
     const previous = series.at(-2);
-    const values = series.map((row) => row.value);
+    const windowStart = trailingDate(latest.observation_date, 10);
+    const values = series.filter((row) => row.observation_date >= windowStart && row.observation_date <= latest.observation_date)
+      .map((row) => row.value);
     return {
       id: indicatorId,
       value: round(latest.value, 2),
@@ -37,7 +39,8 @@ export class MacroService {
       source: latest.source,
       validation_status: latest.validation_status,
       range: rangeStats(values),
-      history: series.slice(-40).map((row) => ({ period: row.period, date: row.observation_date, value: round(row.value, 2) })),
+      history: series.filter((row) => row.observation_date >= windowStart && row.observation_date <= latest.observation_date)
+        .slice(-40).map((row) => ({ period: row.period, date: row.observation_date, value: round(row.value, 2) })),
     };
   }
 
@@ -54,17 +57,22 @@ export class MacroService {
       const value = realPolicyRate(policy.value, inflation?.value ?? null);
       return value == null ? [] : [{ policy, inflation, value }];
     });
-    const realHistory = realHistoryRows.map((row) => row.value);
-    const realValue = realPolicyRate(metrics.policy_rate.value, metrics.inflation.value);
-    const previous = realHistory.at(-2) ?? null;
+    const latestPolicyDate = realHistoryRows.at(-1)?.policy.observation_date;
+    const realWindowStart = latestPolicyDate ? trailingDate(latestPolicyDate, 10) : null;
+    const realHistory = realHistoryRows.filter((row) => !realWindowStart || row.policy.observation_date >= realWindowStart)
+      .map((row) => row.value);
+    const latestReal = realHistoryRows.at(-1);
+    const realValue = latestReal?.value ?? null;
+    const previous = realHistory.length > 1 ? realHistory.at(-2)! : null;
     metrics.real_policy_rate = {
       id: "real_policy_rate", value: realValue, previous,
       delta: difference(realValue, previous), percentile: percentileRank(realHistory, realValue),
-      period: metrics.policy_rate.period, observation_date: metrics.policy_rate.observation_date,
+      period: latestReal?.policy.period ?? null, observation_date: latestReal?.policy.observation_date ?? null,
       source: "Derived: policy rate - inflation", validation_status:
-        metrics.policy_rate.validation_status === "VALID" && metrics.inflation.validation_status === "VALID" ? "VALID" : "FAILED",
+        latestReal?.policy.validation_status === "VALID" && latestReal?.inflation?.validation_status === "VALID" ? "VALID" : "FAILED",
       range: rangeStats(realHistory),
-      history: realHistoryRows.slice(-40).map(({ policy, value }) => ({ period: policy.period, date: policy.observation_date, value })),
+      history: realHistoryRows.filter((row) => !realWindowStart || row.policy.observation_date >= realWindowStart)
+        .slice(-40).map(({ policy, value }) => ({ period: policy.period, date: policy.observation_date, value })),
     };
     const base = country || {
       code, name: catalog!.name, region: catalog!.geographic_region,
@@ -85,8 +93,7 @@ export class MacroService {
   }
 
   universe(period?: string | null, universe = "all", tier?: number | null, region?: string | null, coverageMin = 0) {
-    const snapshots = new Map(this.allSnapshots(period).map((country) => [country.code, country]));
-    return [...this.catalog.values()].map((metadata) => snapshots.get(metadata.code) || this.countrySnapshot(metadata.code, period))
+    return this.allSnapshots(period)
       .filter((country) => matches(country, universe, tier, region, coverageMin))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -128,7 +135,21 @@ export class MacroService {
   }
 
   availablePeriods() {
-    return [...new Set(this.data.observations.map((row) => row.period))].sort();
+    const dates = this.data.observations.filter((row) => row.validation_status !== "FAILED").map((row) => row.observation_date).sort();
+    if (!dates.length) return [];
+    const start = quarterOf(dates[0]);
+    const end = quarterOf(dates.at(-1)!);
+    const periods: string[] = [];
+    let year = Number(start.slice(0, 4));
+    let quarter = Number(start.at(-1));
+    const endYear = Number(end.slice(0, 4));
+    const endQuarter = Number(end.at(-1));
+    while (year < endYear || (year === endYear && quarter <= endQuarter)) {
+      periods.push(`${year}-Q${quarter}`);
+      quarter += 1;
+      if (quarter === 5) { year += 1; quarter = 1; }
+    }
+    return periods;
   }
 
   timeline() {
@@ -154,6 +175,17 @@ function periodEnd(period: string): string {
   }
   if (/^\d{4}$/.test(period)) return `${period}-12-31`;
   return period;
+}
+
+function quarterOf(date: string): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return `${parsed.getUTCFullYear()}-Q${Math.floor(parsed.getUTCMonth() / 3) + 1}`;
+}
+
+function trailingDate(date: string, years: number): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  parsed.setUTCFullYear(parsed.getUTCFullYear() - years);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function emptyMetric(id: string) {

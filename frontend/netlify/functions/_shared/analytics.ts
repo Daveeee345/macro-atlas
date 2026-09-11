@@ -6,7 +6,7 @@ const REQUIRED_INDICATORS = [
   "gov_10y",
   "current_account",
   "debt_gdp",
-  "credit_growth",
+  "private_credit_gdp",
 ] as const;
 
 export { REQUIRED_INDICATORS };
@@ -34,9 +34,9 @@ export function difference(left: number | null, right: number | null): number | 
 
 export function regime(growth: number | null, inflation: number | null): string {
   if (growth == null || inflation == null) return "UNCLASSIFIED";
-  if (growth >= 50 && inflation >= 50) return "OVERHEATING";
-  if (growth >= 50) return "EXPANSION";
-  if (inflation >= 50) return "STAGFLATION";
+  if (growth > 50 && inflation > 50) return "OVERHEATING";
+  if (growth > 50) return "EXPANSION";
+  if (inflation > 50) return "STAGFLATION";
   return "SLOWDOWN";
 }
 

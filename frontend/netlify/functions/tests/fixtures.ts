@@ -13,7 +13,8 @@ export function fixtureDataset(): Dataset {
   ];
   return {
     catalog: [{ ...base, code: "CAN", name: "Canada" }, { ...base, code: "NPL", name: "Nepal", iso2: "NP", iso3: "NPL", numeric_code: "524", geographic_region: "Asia", subregion: "Southern Asia", lat: 28, lon: 84 }],
-    countries: [{ code: "CAN", name: "Canada", region: "Americas", lat: 56, lon: -106, gdp_weight: 1, tier: 2, coverage_score: 0 }],
+    countries: [{ code: "CAN", name: "Canada", region: "Americas", subregion: "North America", lat: 56, lon: -106,
+      gdp_weight: 1, tier: 2, is_core: false, coverage_score: 0, data_status: "UNAVAILABLE" }],
     indicators: ["gdp_growth", "inflation", "policy_rate"].map((id) => ({ id, name: id, category: "test", unit: "%", frequency: "Quarterly", transformation: "level", description: null, methodology_version: "v1" })),
     observations,
   };

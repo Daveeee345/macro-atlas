@@ -18,17 +18,16 @@ Macro Atlas is a portfolio-grade macroeconomic intelligence terminal that turns 
 - **Data Lineage Drawer** — click metric information icons to inspect the source observation and transformation.
 - **Command Palette** — `⌘K` / `Ctrl+K` navigation.
 - **Netlify Functions API** — same-origin serverless endpoints backed by Supabase PostgreSQL.
-- **Official-source connector scaffolds** — FRED and World Bank clients.
+- **Official-source ingestion** — programmatic World Bank WDI coverage plus optional approved FRED mappings.
 - **Reference FastAPI application** — retained for local comparison and methodology history; it is not required in production.
 
 > **Production guardrail:** Netlify Functions never read the bundled SQLite demo database and never synthesize missing observations. An unconfigured production database returns empty/N/A state until reviewed official mappings are synchronized.
 
 ## Global country universe
 
-Atlas now supports an additive, tiered geographic catalog with observation-based
-coverage, seven analytical layers, universe filters, country focus, zoom/pan and
-historical motion. Uncovered economies remain geographically selectable with null
-metrics. See [implementation and verification notes](docs/UI_EVOLUTION.md).
+Atlas separates 253 geographic/reference entries from 195 analytical economies,
+including the Euro Area macro entity. Coverage is observation-based across three
+tiers. Uncovered economies remain selectable with null metrics.
 
 ## Architecture
 
@@ -87,7 +86,7 @@ Open `http://localhost:8888`. Netlify Dev proxies Next.js and the Functions API 
 /data             Data system & methodology
 ```
 
-## Demo timeline
+## Observation-state timeline
 
 The bottom timeline is functional. Selecting a historical quarter calls period-aware API endpoints and recalculates:
 
@@ -98,7 +97,10 @@ The bottom timeline is functional. Selecting a historical quarter calls period-a
 - policy ranking,
 - comparison results.
 
-The demo history spans 2016–2026 Q2.
+The API generates canonical quarterly states from actual valid observation dates.
+Each state resolves the latest observation at or before quarter end. This is
+observation-period playback, not a reconstruction of what was known on that date;
+WDI publication lags and later revisions can therefore affect historical states.
 
 ## Methodological guardrails
 
@@ -113,8 +115,8 @@ Macro Atlas deliberately avoids outputs such as:
 Core V1 calculations are deterministic:
 
 ```text
-Historical percentile = within-series percentile rank
-Real policy rate       = policy rate − headline CPI inflation
+Historical percentile = empirical rank within the trailing 10 calendar years
+Real policy rate       = policy rate − latest inflation dated on/before the policy observation
 Country divergence     = Country A − Country B
 Macro regime           = growth percentile × inflation percentile
 ```
@@ -123,7 +125,21 @@ See [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 
 ## Production data
 
-The repository includes working FRED and World Bank HTTP clients, but production series mappings are intentionally not guessed. Configure only verified series IDs after checking:
+Production bulk synchronization uses an allowlisted World Bank WDI registry for
+GDP growth, CPI inflation, current-account/GDP, central-government debt/GDP, and
+private-credit/GDP. Optional mappings must still be verified for definition,
+frequency, units, seasonal adjustment, observation period, revision policy, and
+licensing.
+
+Current limitations:
+
+- policy rates remain N/A until current BIS `WS_CBPOL` mappings are verified;
+- comparable 10-year sovereign yields remain N/A without approved official mappings;
+- WDI availability and publication lag differ by country and indicator;
+- values may be revised, with each changed value retained as a new vintage;
+- historical states use observation dates rather than release-time information sets.
+
+For any added series, verify:
 
 1. economic definition,
 2. frequency,
@@ -138,11 +154,16 @@ See [`docs/PRODUCTION_DATA.md`](docs/PRODUCTION_DATA.md).
 ## Tests
 
 ```bash
-cd backend
-PYTHONPATH=. pytest -q
+cd frontend
+npm run test:unit
+npm run typecheck
+npm run lint
+npm run build
 ```
 
-The included tests cover analytics and API behavior, including historical-period snapshots.
+Tests cover canonical quarter generation and playback, cutoff safety, trailing
+10-year percentiles, date-aligned real rates, missing values, revision preservation,
+API behavior, global sync filtering, and map matching.
 
 ## Production stack
 

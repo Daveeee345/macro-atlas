@@ -7,6 +7,7 @@ const connectionString = process.env.SUPABASE_DATABASE_URL;
 if (!connectionString) throw new Error("SUPABASE_DATABASE_URL is required");
 const catalogPath = fileURLToPath(new URL("../../backend/data/country_catalog.json", import.meta.url));
 const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
+const analyticalCountries = catalog.filter((country: any) => country.entity_type === "country" || country.code === "EUR");
 const indicators = [
   ["gdp_growth", "Real GDP Growth", "Growth", "% YoY", "Quarterly / source-native", "source-defined annual growth or YoY transformation", "Observed real GDP growth"],
   ["inflation", "Consumer Price Inflation", "Inflation", "% YoY", "Monthly", "year-over-year", "Headline consumer price inflation"],
@@ -14,9 +15,8 @@ const indicators = [
   ["gov_10y", "10Y Government Yield", "Rates", "%", "Daily / latest available", "level", "10-year sovereign yield"],
   ["current_account", "Current Account Balance", "External", "% GDP", "Quarterly / Annual", "level", "Current account as share of GDP"],
   ["debt_gdp", "Government Debt", "Fiscal", "% GDP", "Quarterly / Annual", "level", "Government debt as share of GDP"],
-  ["credit_growth", "Private Credit Growth", "Credit", "% YoY", "Monthly / Quarterly", "year-over-year", "Private credit growth"],
+  ["private_credit_gdp", "Domestic Credit to Private Sector", "Credit", "% GDP", "Annual", "level", "Domestic credit to private sector as a share of GDP"],
 ];
-const weights: Record<string, number> = { IDN: 1.4, USA: 4.8, CHN: 3.5, JPN: 2, IND: 2.4, EUR: 3.1, GBR: 1.3, BRA: 1.2 };
 const sql = postgres(connectionString, { max: 1, prepare: false, ssl: "require" });
 
 try {
@@ -30,19 +30,19 @@ try {
         geographic_region=excluded.geographic_region,subregion=excluded.subregion,tier=excluded.tier,is_core=excluded.is_core,
         groups=excluded.groups,entity_type=excluded.entity_type,lat=excluded.lat,lon=excluded.lon,metadata=excluded.metadata,updated_at=now()`,
       [catalog.map((country: any) => ({ ...country, metadata: country }))]);
-    await tx.unsafe(`insert into public.countries(code,name,region,lat,lon,gdp_weight,tier)
-      select x.code,x.name,x.region,x.lat,x.lon,x.gdp_weight,x.tier
-      from jsonb_to_recordset($1::jsonb) as x(code text,name text,region text,lat double precision,lon double precision,gdp_weight double precision,tier smallint)
+    await tx.unsafe(`insert into public.countries(code,name,region,subregion,lat,lon,gdp_weight,tier,is_core,data_status)
+      select x.code,x.name,x.region,x.subregion,x.lat,x.lon,null,x.tier,x.is_core,'UNAVAILABLE'
+      from jsonb_to_recordset($1::jsonb) as x(code text,name text,region text,subregion text,lat double precision,lon double precision,tier smallint,is_core boolean)
       on conflict(code) do update set name=excluded.name,region=excluded.region,lat=excluded.lat,lon=excluded.lon,
-        gdp_weight=excluded.gdp_weight,tier=excluded.tier,updated_at=now()`,
-      [catalog.filter((country: any) => country.is_core).map((country: any) => ({ ...country, gdp_weight: weights[country.code] || null }))]);
+        subregion=excluded.subregion,tier=excluded.tier,is_core=excluded.is_core,updated_at=now()`,
+      [analyticalCountries]);
     await tx.unsafe(`insert into public.indicators(id,name,category,unit,frequency,transformation,description)
       select * from jsonb_to_recordset($1::jsonb) as x(id text,name text,category text,unit text,frequency text,transformation text,description text)
       on conflict(id) do update set name=excluded.name,category=excluded.category,unit=excluded.unit,frequency=excluded.frequency,
         transformation=excluded.transformation,description=excluded.description,updated_at=now()`,
       [indicators.map(([id, name, category, unit, frequency, transformation, description]) => ({ id, name, category, unit, frequency, transformation, description }))]);
   });
-  console.log(`Seeded ${catalog.length} catalog entries, ${catalog.filter((country: any) => country.is_core).length} analytical countries, and ${indicators.length} indicators.`);
+  console.log(`Seeded ${catalog.length} catalog entries, ${analyticalCountries.length} analytical countries, and ${indicators.length} indicators.`);
 } finally {
   await sql.end();
 }

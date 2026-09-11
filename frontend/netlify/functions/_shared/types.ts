@@ -21,11 +21,14 @@ export type Country = {
   code: string;
   name: string;
   region: string;
+  subregion: string;
   lat: number;
   lon: number;
   gdp_weight: number | null;
   tier: 1 | 2 | 3;
+  is_core: boolean;
   coverage_score: number;
+  data_status: "FULL" | "GOOD" | "PARTIAL" | "LIMITED" | "UNAVAILABLE";
 };
 
 export type Indicator = {

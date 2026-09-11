@@ -79,8 +79,11 @@ export type SystemStatus = {
   countries: number;
   series: number;
   observations: number;
+  economies_with_observations: number;
   validation_warnings: number;
   last_sync: string | null;
   latest_period: string | null;
   data_label: string;
+  last_completed_sync?: string | null;
+  providers?: Array<{ source: string; observations: number; countries: number; series: number }>;
 };

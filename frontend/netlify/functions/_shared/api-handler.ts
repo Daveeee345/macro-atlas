@@ -47,7 +47,7 @@ export async function handleApi(request: Request, repository: ApiRepository = ne
       if (!record) return json({ detail: "Lineage not found" }, 404);
       return json({ ...record,
         derived: { historical_percentile: service.metricSummary(code, indicator).percentile,
-          historical_window: "Latest revision for each available observation period" },
+          historical_window: "Trailing 10 calendar years ending at the displayed observation date; no future observations" },
         methodology: "Observed data plus deterministic transformations. No forecasting or causal estimation.",
       });
     }

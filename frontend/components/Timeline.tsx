@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { nextPlaybackPeriod, periodsForRange } from "@/lib/timeline";
 export default function Timeline({
   periods,
   selected,
@@ -14,7 +15,7 @@ export default function Timeline({
   const [playing, setPlaying] = useState(false),
     [range, setRange] = useState(0);
   const visible = useMemo(
-    () => (range ? periods.slice(-range) : periods),
+    () => periodsForRange(periods, range),
     [periods, range],
   );
   const index = Math.max(0, visible.indexOf(selected || ""));
@@ -22,12 +23,12 @@ export default function Timeline({
   useEffect(() => {
     if (!playing || busy || !visible.length) return;
     const id = window.setTimeout(() => {
-      const i = visible.indexOf(selected || "");
-      if (i >= visible.length - 1) {
+      const next = nextPlaybackPeriod(visible, selected);
+      if (!next) {
         setPlaying(false);
         return;
       }
-      onSelect(visible[Math.max(0, i + 1)]);
+      onSelect(next);
     }, 1100);
     return () => window.clearTimeout(id);
   }, [playing, busy, visible, selected, onSelect]);
@@ -50,7 +51,7 @@ export default function Timeline({
       <div className="time-machine-label">
         <span>TIME MACHINE</span>
         <strong>
-          {latest ? "Latest available" : "As of"}{" "}
+          {latest ? "Latest observation state" : "Historical state"}{" "}
           <b>{selected?.replace("-", " ") || "—"}</b>
         </strong>
       </div>
@@ -96,7 +97,7 @@ export default function Timeline({
           {busy
             ? "Updating state…"
             : playing
-              ? "Playing quarterly observations"
+              ? "Playing quarterly observation states"
               : ""}
         </span>
       </div>
@@ -114,7 +115,7 @@ export default function Timeline({
               const size = Number(n);
               setRange(size);
               setPlaying(false);
-              const ps = size ? periods.slice(-size) : periods;
+              const ps = periodsForRange(periods, size);
               if (selected && ps.length && !ps.includes(selected))
                 onSelect(ps[0]);
             }}
