@@ -43,6 +43,7 @@ export default function MacroApp({
     [right, setRight] = useState("USA");
   const [compareBusy, setCompareBusy] = useState(false);
   const [countries, setCountries] = useState<CountrySnapshot[]>([]);
+  const [countryDetail, setCountryDetail] = useState<CountrySnapshot | null>(null);
   const [compare, setCompare] = useState<CompareResponse | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [periods, setPeriods] = useState<string[]>([]);
@@ -101,6 +102,18 @@ export default function MacroApp({
       window.clearTimeout(timer);
     };
   }, [period]);
+
+  const activeCountryCode = view === "compare" ? left : selected;
+  useEffect(() => {
+    if (!countries.length || !activeCountryCode) return;
+    let cancelled = false;
+    api.country(activeCountryCode, period).then((detail) => {
+      if (!cancelled) setCountryDetail(detail);
+    }).catch((e) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+    });
+    return () => { cancelled = true; };
+  }, [activeCountryCode, period, countries.length]);
 
   useEffect(() => {
     if (view !== "compare") return;
@@ -177,10 +190,9 @@ export default function MacroApp({
 
   const country = useMemo(
     () =>
-      countries.find(
-        (c) => c.code === (view === "compare" ? left : selected),
-      ) || null,
-    [countries, selected, view, left],
+      (countryDetail?.code === activeCountryCode ? countryDetail : null) ||
+      countries.find((c) => c.code === activeCountryCode) || null,
+    [countries, countryDetail, activeCountryCode],
   );
 
   return (

@@ -23,3 +23,10 @@ test("serverless API validates filters and reports production status", async () 
   assert.equal(status.mode, "LIVE_OFFICIAL");
   assert.equal(status.storage, undefined);
 });
+
+test("universe payload is compact while country detail retains chart history", async () => {
+  const universe: any[] = await (await handleApi(new Request("http://localhost/api/universe"), repository)).json();
+  const detail: any = await (await handleApi(new Request("http://localhost/api/countries/CAN"), repository)).json();
+  assert.deepEqual(universe[0].metrics.gdp_growth.history, []);
+  assert.equal(detail.metrics.gdp_growth.history.length, 2);
+});

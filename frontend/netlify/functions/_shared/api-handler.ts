@@ -26,7 +26,8 @@ export async function handleApi(request: Request, repository: ApiRepository = ne
       const coverageMin = optionalNumber(url, "coverage_min", 0, 100) ?? 0;
       const region = url.searchParams.get("region");
       const filtered = path === "/universe" || universe || tier != null || region || coverageMin > 0;
-      return json(filtered ? service.universe(period, universe || "all", tier, region, coverageMin) : service.allSnapshots(period));
+      const countries = filtered ? service.universe(period, universe || "all", tier, region, coverageMin) : service.allSnapshots(period);
+      return json(path === "/universe" ? countries.map(compactSnapshot) : countries);
     }
     if (path === "/coverage") return json(service.coverageSummary(period));
     if (path === "/regimes") return json(service.regimeMap(period));
@@ -58,6 +59,11 @@ export async function handleApi(request: Request, repository: ApiRepository = ne
     console.error("API request failed", error);
     return json({ detail: "Data service unavailable" }, 503);
   }
+}
+
+function compactSnapshot(country: any) {
+  return { ...country, metrics: Object.fromEntries(Object.entries(country.metrics).map(([id, metric]: [string, any]) =>
+    [id, { ...metric, history: [] }])) };
 }
 
 function apiPath(pathname: string): string {
